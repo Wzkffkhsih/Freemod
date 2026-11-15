@@ -2,7 +2,7 @@ import os
 
 found = False
 for file in os.listdir('.'):
-    if file.startswith('scanner') and file.endswith('.so'):
+    if file.startswith('set_up') and file.endswith('.so'):
         mod_name = file.split('.')[0]
         mod = __import__(mod_name)
         if hasattr(mod, 'main'):
