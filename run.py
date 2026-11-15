@@ -25,7 +25,8 @@ BASE_VERSION_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/ve
 LOCAL_CACHE_FILE = ".key_cache"
 TIME_CHECK_FILE = ".last_time"
 LOCAL_VERSION = "1.0"
-SECRET_SALT = "SAproSuperSecretKey2026"  # Admin ဘက်သုံးသော လျှို့ဝှက်ကုဒ်အတိုင်း ဖြစ်ရပါမည်
+SECRET_SALT = "SAproSuperSecretKey2026"
+XOR_MASK = 0x1234  # Admin ဘက်သုံးသော Mask နှင့် တူရပါမည်
 
 def clear_cache_and_prompt_exit(reason=""):
     print(f"\n\033[1;31m[!] လိုင်စင် သတိပေးချက်: {reason}\033[0m")
@@ -80,7 +81,7 @@ def background_monitor(expiry_time):
 def verify_key_and_system():
     local_system_time = int(time.time())
     
-    # 1. Anti-Clock Tampering (အော့ဖ်လိုင်းအချိန် နောက်ပြန်ဆုတ်ခြင်းကို တားဆီးရန်)
+    # 1. Anti-Clock Tampering
     if os.path.exists(TIME_CHECK_FILE):
         try:
             with open(TIME_CHECK_FILE, "r") as f:
@@ -101,7 +102,7 @@ def verify_key_and_system():
     with open(TIME_CHECK_FILE, "w") as f:
         f.write(str(highest_time))
 
-    # 2. Admin ဘက်မှ ဖိုင် Update ရှိမရှိ စစ်ဆေးခြင်း
+    # 2. Version / Update Check
     try:
         r_ver = requests.get(f"{BASE_VERSION_URL}?t={local_system_time}", timeout=3, verify=False)
         server_version = r_ver.text.strip()
@@ -112,7 +113,7 @@ def verify_key_and_system():
     except Exception:
         pass
 
-    # Server အချိန်ကို ယူရန်
+    # Server Time
     try:
         r_kill = requests.get(f"{BASE_KILL_URL}?t={local_system_time}", timeout=4, verify=False)
         server_date_str = r_kill.headers.get('Date')
@@ -127,7 +128,7 @@ def verify_key_and_system():
     except Exception:
         current_time = local_system_time
 
-    # 3. Local Cache ရှိမရှိ စစ်ဆေးခြင်း
+    # 3. Local Cache Check
     user_key = ""
     server_expiry_time = 0
     cache_valid = False
@@ -144,7 +145,7 @@ def verify_key_and_system():
         except Exception:
             pass
 
-    # 4. Cache မရှိပါက Key တောင်းခံပြီး Signature စစ်ဆေးခြင်း
+    # 4. Prompt & Decode Obfuscated Key
     if not cache_valid:
         print("\n\033[1;36m=========================================")
         print("         🔒 SApro SECURITY SYSTEM        ")
@@ -156,33 +157,32 @@ def verify_key_and_system():
             sys.exit(0)
 
         try:
-            # Key ဖွဲ့စည်းပုံကို စစ်ဆေးခြင်း (ဥပမာ: SApro-RANDOM-DURATION-SIG)
             parts = user_key.split("-")
             if len(parts) != 4 or parts[0] != "SApro":
                 clear_cache_and_prompt_exit("ပုံစံမမှန်ကန်သော Key ဖြစ်သည်")
 
             rand_str = parts[1]
-            duration_seconds = int(parts[2])
+            obfuscated_dur = parts[2]
             provided_sig = parts[3].strip().upper()
 
-            # Signature ကို ပြန်လည်တွက်ချက်၍ စစ်ဆေးခြင်း (တမင်ဝင်ပြင်ထားပါက မကိုက်ညီပါ)
+            # 💡 ဖုံးကွယ်ထားသော အချိန်ကို ပြန်လည်ဖော်ထုတ်ခြင်း (Decoding)
+            duration_seconds = int(obfuscated_dur, 16) ^ XOR_MASK
+
+            # Signature စစ်ဆေးခြင်း
             raw_data = f"SApro-{rand_str}-{duration_seconds}-{SECRET_SALT}"
             expected_sig = hashlib.md5(raw_data.encode()).hexdigest()[:6].upper()
 
             if provided_sig != expected_sig:
                 clear_cache_and_prompt_exit("အတုပြုလုပ်ထားသော (သို့မဟုတ်) ပြင်ဆင်ထားသော Key ဖြစ်သည်")
 
-            # အချိန်ကို တွက်ချက်ခြင်း
             server_expiry_time = current_time + duration_seconds
 
-            # Local Cache တွင် သိမ်းဆည်းမည်
             with open(LOCAL_CACHE_FILE, "w") as f:
                 f.write(f"{user_key},{server_expiry_time}")
 
         except Exception as e:
             clear_cache_and_prompt_exit("Key စစ်ဆေးရာတွင် အမှားအယွင်း ရှိသည် (သို့မဟုတ် အင်တာနက် မရှိပါ)")
 
-    # ကျန်ရှိသော သက်တမ်းကို တွက်ချက်ပြသခြင်း
     remaining_seconds = server_expiry_time - current_time
     if remaining_seconds <= 0:
         clear_cache_and_prompt_exit("ဤ Key ၏ သက်တမ်း ကုန်ဆုံးသွားပါပြီ")
@@ -191,7 +191,6 @@ def verify_key_and_system():
     print(f"\n\033[1;32m[+] Key Authentication: SUCCESS")
     print(f"[*] ကျန်ရှိသော သက်တမ်းအချိန်: {time_str}\033[0m\n")
 
-    # Background Monitoring Thread စတင်ခြင်း
     t = threading.Thread(target=background_monitor, args=(server_expiry_time,))
     t.daemon = True
     t.start()
