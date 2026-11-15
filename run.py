@@ -7,34 +7,21 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ══════════════════════════════════════════════════════════
-# ၁။ လိုအပ်သော Library များကို အလိုအလျောက်စစ်ဆေးပြီး တင်ရန်
-# ══════════════════════════════════════════════════════════
+# ၁။ လိုအပ်သော Library စစ်ဆေးခြင်း
 required_packages = ['requests']
-
 for package in required_packages:
     try:
         __import__(package)
     except ImportError:
-        print(f"[!] '{package}' library မရှိပါ၊ အလိုအလျောက် ဒေါင်းလုဒ်လုပ်နေပါပြီ...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-            print(f"[✓] '{package}' ကို အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ။")
-        except Exception as e:
-            print(f"[!] Library ထည့်သွင်းမှု မအောင်မြင်ပါ: {e}")
-            sys.exit(1)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 import requests
 
-# ══════════════════════════════════════════════════════════
-# ၂။ Self-Destruct & Remote Kill Switch
-# ══════════════════════════════════════════════════════════
 BASE_KILL_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/kill.txt"
 
 def self_destruct_and_exit():
-    print(f"\n\033[1;31m[!] Access Revoked: အသုံးပြုခွင့် ရုပ်သိမ်းခံရသဖြင့် ဖိုင်များကို ဖျက်ဆီးနေပါသည်...\033[0m")
+    print(f"\n\033[1;31m[!] Security Alert: အင်တာနက်ချိတ်ဆက်၍ မရပါ (သို့မဟုတ်) အသုံးပြုခွင့် ရုပ်သိမ်းထားသည်။ ဖိုင်များကို ဖျက်ဆီးနေပါသည်...\033[0m")
     try:
-        # လက်ရှိ Freemod ဖိုဒါအတွင်းရှိ ဖိုင်များနှင့် ဖိုဒါများကို အစအနမကျန် ဖျက်မည်
         current_dir = os.path.dirname(os.path.abspath(__file__))
         for filename in os.listdir(current_dir):
             file_path = os.path.join(current_dir, filename)
@@ -51,18 +38,30 @@ def self_destruct_and_exit():
 
 def check_kill_switch():
     try:
-        # Cache မမိစေရန် timestamp ဖြင့် ချိတ်ဆက်ခြင်း
+        # Cache မမိစေရန် timestamp ဖြင့် အချိန်နဲ့တပြေးညီ စစ်ဆေးခြင်း
         url = f"{BASE_KILL_URL}?t={int(time.time())}"
-        r = requests.get(url, timeout=5, verify=False)
+        # Timeout 4 စက္ကန့်သတ်မှတ်ထားသည်
+        r = requests.get(url, timeout=4, verify=False)
         content = r.text.strip().upper()
         
+        # GitHub ပေါ်တွင် STOP သို့မဟုတ် OFF ဖြစ်နေပါက ချက်ချင်းဖျက်မည်
         if "STOP" in content or "OFF" in content:
+            print(f"[!] Server Status: Restricted Access.")
             self_destruct_and_exit()
-    except Exception:
-        # အင်တာနက်လိုင်း မရှိလျှင် သို့မဟုတ် ဆာဗာချိတ်ဆက်၍ မရလျှင် လုံခြုံရေးအရ ဖျက်ဆီးပစ်ရန် (သို့မဟုတ် ကျော်သွားရန်)
-        pass
+            
+        # RUN ဟူသော စာသား အတိအကျ မပါရှိပါကလည်း လုံခြုံရေးအရ ပိတ်မည်
+        if "RUN" not in content:
+            self_destruct_and_exit()
+            
+    except Exception as e:
+        # ⚠️ အဓိက လုံခြုံရေး အချက်: 
+        # အသုံးပြုသူက အင်တာနက်ပိတ်ထားလျှင် (Offline) သို့မဟုတ် ဆာဗာချိတ်ဆက်၍မရလျှင်
+        # ကျော်သွားခွင့်မပေးဘဲ ချက်ချင်း Self-Destruct လုပ်မည် (Fail-Closed Policy)
+        print(f"[!] Offline Bypass Blocked: အင်တာနက်ချိတ်ဆက်မှု မရှိပါ။")
+        self_destruct_and_exit()
 
 if __name__ == "__main__":
+    # စကရစ် မစတင်မီ အင်တာနက်မှတဆင့် Kill Switch ကို မဖြစ်မနေ အရင်စစ်မည်
     check_kill_switch()
     
     found = False
@@ -75,7 +74,7 @@ if __name__ == "__main__":
                     found = True
                     mod.main()
             except Exception as e:
-                print(f"[!] မော်ဂျူးကို ဖတ်ရှုရာတွင် အမှားအယွင်းရှိပါသည်: {e}")
+                print(f"[!] မော်ဂျူး အမှား: {e}")
             break
 
     if not found:
