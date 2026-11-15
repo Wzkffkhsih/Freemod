@@ -4,6 +4,7 @@ import subprocess
 import time
 import shutil
 import threading
+import hashlib
 from email.utils import parsedate_to_datetime
 import urllib3
 
@@ -19,16 +20,16 @@ for package in required_packages:
 import requests
 
 BASE_KILL_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/kill.txt"
-BASE_KEYS_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/keys.txt"
 BASE_VERSION_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/version.txt"
 
 LOCAL_CACHE_FILE = ".key_cache"
 TIME_CHECK_FILE = ".last_time"
-LOCAL_VERSION = "1.0"  # Admin က version.txt ကို ပြောင်းလျှင် Update တောင်းမည်
+LOCAL_VERSION = "1.0"
+SECRET_SALT = "SAproSuperSecretKey2026"  # Admin ဘက်သုံးသော လျှို့ဝှက်ကုဒ်အတိုင်း ဖြစ်ရပါမည်
 
 def clear_cache_and_prompt_exit(reason=""):
     print(f"\n\033[1;31m[!] လိုင်စင် သတိပေးချက်: {reason}\033[0m")
-    print(f"\033[1;33m[*] ကျေးဇူးပြု၍ Key အသစ် ပြန်လည် ထည့်သွင်းပါ...\033[0m")
+    print(f"\033[1;33m[*] ကျေးဇူးပြု၍ မှန်ကန်သော Key အသစ် ပြန်လည် ထည့်သွင်းပါ...\033[0m")
     if os.path.exists(LOCAL_CACHE_FILE):
         try:
             os.remove(LOCAL_CACHE_FILE)
@@ -79,7 +80,7 @@ def background_monitor(expiry_time):
 def verify_key_and_system():
     local_system_time = int(time.time())
     
-    # ၁။ Anti-Clock Tampering (အော့ဖ်လိုင်းအချိန် နောက်ပြန်ဆုတ်ခြင်းကို တားဆီးရန်)
+    # 1. Anti-Clock Tampering (အော့ဖ်လိုင်းအချိန် နောက်ပြန်ဆုတ်ခြင်းကို တားဆီးရန်)
     if os.path.exists(TIME_CHECK_FILE):
         try:
             with open(TIME_CHECK_FILE, "r") as f:
@@ -100,7 +101,7 @@ def verify_key_and_system():
     with open(TIME_CHECK_FILE, "w") as f:
         f.write(str(highest_time))
 
-    # ၂။ Admin ဘက်မှ ဖိုင် Update ရှိမရှိ စစ်ဆေးခြင်း
+    # 2. Admin ဘက်မှ ဖိုင် Update ရှိမရှိ စစ်ဆေးခြင်း
     try:
         r_ver = requests.get(f"{BASE_VERSION_URL}?t={local_system_time}", timeout=3, verify=False)
         server_version = r_ver.text.strip()
@@ -126,7 +127,7 @@ def verify_key_and_system():
     except Exception:
         current_time = local_system_time
 
-    # ၃။ Local Cache ရှိမရှိ စစ်ဆေးခြင်း (ရှိပြီးသားဆိုလျှင် သက်တမ်း ဆက်လက်ရေတွက်မည်)
+    # 3. Local Cache ရှိမရှိ စစ်ဆေးခြင်း
     user_key = ""
     server_expiry_time = 0
     cache_valid = False
@@ -143,50 +144,43 @@ def verify_key_and_system():
         except Exception:
             pass
 
-    # ၄။ Cache မရှိတော့ပါက (သို့မဟုတ် သက်တမ်းကုန်သွားပါက) Key အသစ် တောင်းခံမည်
+    # 4. Cache မရှိပါက Key တောင်းခံပြီး Signature စစ်ဆေးခြင်း
     if not cache_valid:
         print("\n\033[1;36m=========================================")
         print("         🔒 SApro SECURITY SYSTEM        ")
         print("=========================================\033[0m")
-        raw_input_key = input("🔑 ကျေးဇူးပြု၍ သင့်၏ Key ကို ထည့်ပါ: ").strip()
+        user_key = input("🔑 ကျေးဇူးပြု၍ သင့်၏ Secure Key ကို ထည့်ပါ: ").strip()
         
-        if "," in raw_input_key:
-            user_key = raw_input_key.split(",")[0].strip()
-        else:
-            user_key = raw_input_key
-            
         if not user_key:
             print("[!] Key ထည့်သွင်းခြင်း မရှိပါ။ ပိတ်လိုက်ပါပြီ။")
             sys.exit(0)
 
         try:
-            # GitHub မှ keys.txt ကို ဆွဲယူစစ်ဆေးခြင်း
-            r_keys = requests.get(f"{BASE_KEYS_URL}?t={local_system_time}", timeout=4, verify=False)
-            keys_lines = r_keys.text.strip().split("\n")
-            
-            valid_key_found = False
-            duration_seconds = 0
-            
-            for line in keys_lines:
-                if "," in line:
-                    k, dur = line.strip().split(",")
-                    if k.strip() == user_key:
-                        valid_key_found = True
-                        duration_seconds = int(dur.strip())
-                        break
-            
-            if not valid_key_found:
-                clear_cache_and_prompt_exit("မှားယွင်းနေသော Key (သို့မဟုတ်) အသုံးမပြုနိုင်တော့သော Key ဖြစ်သည်")
+            # Key ဖွဲ့စည်းပုံကို စစ်ဆေးခြင်း (ဥပမာ: SApro-RANDOM-DURATION-SIG)
+            parts = user_key.split("-")
+            if len(parts) != 4 or parts[0] != "SApro":
+                clear_cache_and_prompt_exit("ပုံစံမမှန်ကန်သော Key ဖြစ်သည်")
 
-            # 💡 အဓိက အပြောင်းအလဲ: Key ထည့်လိုက်သည့် လက်ရှိအချိန်မှစ၍ သက်တမ်းကို တွက်ချက်မည်
+            rand_str = parts[1]
+            duration_seconds = int(parts[2])
+            provided_sig = parts[3].strip().upper()
+
+            # Signature ကို ပြန်လည်တွက်ချက်၍ စစ်ဆေးခြင်း (တမင်ဝင်ပြင်ထားပါက မကိုက်ညီပါ)
+            raw_data = f"SApro-{rand_str}-{duration_seconds}-{SECRET_SALT}"
+            expected_sig = hashlib.md5(raw_data.encode()).hexdigest()[:6].upper()
+
+            if provided_sig != expected_sig:
+                clear_cache_and_prompt_exit("အတုပြုလုပ်ထားသော (သို့မဟုတ်) ပြင်ဆင်ထားသော Key ဖြစ်သည်")
+
+            # အချိန်ကို တွက်ချက်ခြင်း
             server_expiry_time = current_time + duration_seconds
 
-            # Local Cache တွင် Key နှင့် Expiry ကို သိမ်းဆည်းမည်
+            # Local Cache တွင် သိမ်းဆည်းမည်
             with open(LOCAL_CACHE_FILE, "w") as f:
                 f.write(f"{user_key},{server_expiry_time}")
 
         except Exception as e:
-            clear_cache_and_prompt_exit("အင်တာနက် မရှိပါ (ပထမအကြိမ် အွန်လိုင်းဖြင့် Key အတည်ပြုရန် လိုအပ်သည်)")
+            clear_cache_and_prompt_exit("Key စစ်ဆေးရာတွင် အမှားအယွင်း ရှိသည် (သို့မဟုတ် အင်တာနက် မရှိပါ)")
 
     # ကျန်ရှိသော သက်တမ်းကို တွက်ချက်ပြသခြင်း
     remaining_seconds = server_expiry_time - current_time
