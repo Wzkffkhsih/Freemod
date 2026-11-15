@@ -3,6 +3,7 @@ import sys
 import subprocess
 import time
 import shutil
+import threading
 from email.utils import parsedate_to_datetime
 import urllib3
 
@@ -37,7 +38,7 @@ def self_destruct_and_exit(reason=""):
                 pass
     except Exception:
         pass
-    sys.exit(0)
+    os._exit(0)
 
 def format_time_remaining(seconds):
     if seconds <= 0:
@@ -45,7 +46,7 @@ def format_time_remaining(seconds):
     days = seconds // 86400
     hours = (seconds % 86400) // 3600
     minutes = (seconds % 3600) // 60
-    seconds = seconds % 60
+    secs = seconds % 60
     
     parts = []
     if days > 0:
@@ -54,29 +55,46 @@ def format_time_remaining(seconds):
         parts.append(f"{hours} နာရီ")
     if minutes > 0 or hours > 0 or days > 0:
         parts.append(f"{minutes} မိနစ်")
-    parts.append(f"{seconds} စက္ကန့်")
+    parts.append(f"{secs} စက္ကန့်")
     return " ".join(parts)
+
+# 💡 Background Thread: ကိရိယာ သုံးနေစဉ်အတွင်း အချိန်ပြည့် စောင့်ကြည့်ပေးမည့်စနစ်
+def background_monitor(cached_key, expiry_time):
+    while True:
+        time.sleep(30) # ప్రతి 30 စက္ကန့်တစ်ကြိမ် စစ်ဆေးမည်
+        current_time = int(time.time())
+        
+        # သက်တမ်းကုန်သွားပါက ချက်ချင်း ဖျက်မည်
+        if current_time >= expiry_time:
+            print(f"\n\033[1;31m[!] သက်တမ်းကုန်ဆုံးသွားပါပြီ။ ဖိုင်များကို ဖျက်ဆီးနေပါသည်...\033[0m")
+            self_destruct_and_exit("Key သက်တမ်း ကုန်ဆုံးသွားပါပြီ")
+        
+        # အင်တာနက်ရှိလျှင် Kill Switch ကိုပါ အမြဲစစ်မည်
+        try:
+            r_kill = requests.get(f"{BASE_KILL_URL}?t={current_time}", timeout=3, verify=False)
+            content = r_kill.text.strip().upper()
+            if "STOP" in content or "OFF" in content or "RUN" not in content:
+                print(f"\n\033[1;31m[!] Server မှ အသုံးပြုခွင့် ပိတ်လိုက်ပါပြီ။ ဖိုင်များကို ဖျက်ဆီးနေပါသည်...\033[0m")
+                self_destruct_and_exit("Server Access Revoked")
+        except Exception:
+            pass
 
 def verify_key_and_system():
     local_system_time = int(time.time())
     
-    # Anti-Cheat: နာရီနောက်ပြန်ဆုတ်ခြင်း (Clock Rollback) ရှိမရှိ စစ်ဆေးခြင်း
+    # Anti-Clock Tampering (နာရီနောက်ပြန်ဆုတ်မှု စစ်ဆေးခြင်း)
     if os.path.exists(TIME_CHECK_FILE):
         try:
             with open(TIME_CHECK_FILE, "r") as f:
                 last_recorded_time = int(f.read().strip())
-            
-            # လက်ရှိအချိန်သည် အရင်မှတ်ထားခဲ့သော အချိန်ထက် နောက်ကျနေပါက (နာရီကို တမင်နောက်ပြန်ဆုတ်ထားခြင်း)
             if local_system_time < last_recorded_time:
-                self_destruct_and_exit("ဖုန်းနာရီကို တမင်နောက်ပြန်ဆုတ်ထားခြင်း (Time Tampering) ကို တွေ့ရှိရပါသည်")
+                self_destruct_and_exit("ဖုန်းနာရီကို တမင်နောက်ပြန်ဆုတ်ထားခြင်း (Time Tampering)")
         except Exception:
             pass
 
-    # အချိန်အသစ်ကို မှတ်တမ်းတင်မည်
     with open(TIME_CHECK_FILE, "w") as f:
         f.write(str(local_system_time))
 
-    # ဖုန်းထဲတွင် သိမ်းထားသော Key ကို ဖတ်ရှုခြင်း
     user_key = ""
     if os.path.exists(LOCAL_CACHE_FILE):
         try:
@@ -91,16 +109,20 @@ def verify_key_and_system():
         print("\n\033[1;36m=========================================")
         print("         🔒 SApro SECURITY SYSTEM        ")
         print("=========================================\033[0m")
-        user_key = input("🔑 ကျေးဇူးပြု၍ သင့်၏ Key ကို ထည့်ပါ: ").strip()
+        raw_input_key = input("🔑 ကျေးဇူးပြု၍ သင့်၏ Key ကို ထည့်ပါ: ").strip()
+        
+        # 💡 အကယ်၍ အသုံးပြုသူက comma ပါတာတွေပါ ကူးထည့်မိပါက Key ကို သီးသန့်ခွဲထုတ်ပေးမည်
+        if "," in raw_input_key:
+            user_key = raw_input_key.split(",")[0].strip()
+        else:
+            user_key = raw_input_key
+            
         if not user_key:
             print("[!] Key ထည့်သွင်းခြင်း မရှိပါ။ ပိတ်လိုက်ပါပြီ။")
             sys.exit(0)
 
     try:
-        # ၁။ အွန်လိုင်းချိတ်ဆက်ပြီး GitHub ဆာဗာအချိန် (Server Time) ကို ယူခြင်း
         r_kill = requests.get(f"{BASE_KILL_URL}?t={local_system_time}", timeout=4, verify=False)
-        
-        # ဆာဗာ၏ အမှန်တကယ်အချိန်ကို HTTP Header မှ ထုတ်ယူခြင်း (ဖုန်းနာရီ လှည့်စား၍ မရပါ)
         server_date_str = r_kill.headers.get('Date')
         if server_date_str:
             current_time = int(parsedate_to_datetime(server_date_str).timestamp())
@@ -111,7 +133,6 @@ def verify_key_and_system():
         if "STOP" in kill_content or "OFF" in kill_content or "RUN" not in kill_content:
             self_destruct_and_exit("အသုံးပြုခွင့် ရုပ်သိမ်းထားသည် (Kill Switch Active)")
 
-        # ၂။ GitHub မှ keys.txt ကို စစ်ဆေးခြင်း
         r_keys = requests.get(f"{BASE_KEYS_URL}?t={local_system_time}", timeout=4, verify=False)
         keys_lines = r_keys.text.strip().split("\n")
         
@@ -121,9 +142,9 @@ def verify_key_and_system():
         for line in keys_lines:
             if "," in line:
                 k, exp = line.strip().split(",")
-                if k == user_key:
+                if k.strip() == user_key:
                     valid_key_found = True
-                    server_expiry_time = int(exp)
+                    server_expiry_time = int(exp.strip())
                     break
         
         if not valid_key_found:
@@ -133,7 +154,6 @@ def verify_key_and_system():
         if remaining_seconds <= 0:
             self_destruct_and_exit("ဤ Key ၏ သက်တမ်း ကုန်ဆုံးသွားပါပြီ")
 
-        # Local Cache တွင် သိမ်းဆည်းမည်
         with open(LOCAL_CACHE_FILE, "w") as f:
             f.write(f"{user_key},{server_expiry_time}")
             
@@ -141,8 +161,12 @@ def verify_key_and_system():
         print(f"\n\033[1;32m[+] Key Authentication: SUCCESS")
         print(f"[*] ကျန်ရှိသော သက်တမ်းအချိန်: {time_str}\033[0m\n")
 
+        # 💡 Background Monitoring Thread စတင်ခြင်း (အလုပ်လုပ်နေစဉ် အချိန်ပြည့်စစ်ဆေးပေးရန်)
+        t = threading.Thread(target=background_monitor, args=(user_key, server_expiry_time))
+        t.daemon = True
+        t.start()
+
     except Exception as e:
-        # ၃။ အင်တာနက် မရှိပါက (Offline Mode) ဒေသတွင်း Cache ဖြင့် စစ်ဆေးခြင်း
         print(f"[*] Offline Mode: Local cache ကို စစ်ဆေးနေပါသည်...")
         if os.path.exists(LOCAL_CACHE_FILE):
             try:
@@ -158,6 +182,11 @@ def verify_key_and_system():
                     time_str = format_time_remaining(remaining_seconds)
                     print(f"\n\033[1;33m[!] Offline Mode Active (Key: {cached_key})")
                     print(f"[*] ကျန်ရှိသော သက်တမ်းအချိန်: {time_str}\033[0m\n")
+                    
+                    # Offline ဖြစ်နေရင်တောင် Background မှ ဆက်စစ်ပေးမည့် Thread
+                    t = threading.Thread(target=background_monitor, args=(cached_key, cached_expiry))
+                    t.daemon = True
+                    t.start()
             except Exception:
                 self_destruct_and_exit("Local token ပျက်စီးနေပါသည်")
         else:
